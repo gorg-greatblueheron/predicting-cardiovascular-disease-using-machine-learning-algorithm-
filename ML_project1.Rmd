@@ -1,0 +1,509 @@
+---
+title: "ML_Project"
+author: "Varun Putta, Zhiyi Ying, Hang Lei"
+date: "2024-04-27"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#Install and load all important libraries
+suppressMessages(install.packages("tidymodels", repos = "http://cran-us.project.com", quietly = TRUE))
+suppressMessages(library(dplyr))
+suppressMessages(library(ggplot2))
+suppressMessages(library(tidymodels))
+suppressMessages(library(readr))
+suppressMessages(library(ISLR))
+suppressMessages(library(tidyverse))   
+suppressMessages(library(caret))       
+suppressMessages(library(rpart))  
+suppressMessages(library(rpart.plot)) 
+suppressMessages(library(ROCR))        
+```
+
+Data Preparation
+
+One essential part of this project is to import and clean the data as needed. 
+According to the World Health Organization (WHO) stroke is the 2nd leading cause of death globally, responsible for approximately 11% of total deaths.
+This dataset is used to predict whether a patient is likely to get stroke based on the input parameters like gender, age, various diseases, and smoking status. Each row in the data provides relavant information about the patient.
+
+The data is originally taken from kaggel: https://www.kaggle.com/datasets/fedesoriano/stroke-prediction-dataset/data
+
+I. Importing data and creating the Dataframe
+Setting up the working directory; ‘CVD Detection data.csv’ Dataset has already been downloaded from kaggle
+
+```{r}
+setwd("E:/new NYU/Machine learning in Public Health/project/dataset")
+CVD <- read.csv("E:/new NYU/Machine learning in Public Health/CVD Detection data.csv")
+```
+
+II. Examining the DataFrame
+```{r}
+head(CVD)
+str(CVD)
+```
+
+The dataset contains 5110 rows of 12 variables. The variables in the dataframe are
+gender, age, hypertension, heart disease, ever married, work type, residence type
+avg glucose level, bmi, smoking status, stroke
+
+III. Create Tidy Data :
+
+The raw data has been loaded, now we need to pre-process it in order to get the data into a tidy format. To begin with, we need to find if there are any missing values and duplicate columns or rows.
+
+```{r}
+library(tidyverse)   
+library(caret)       
+library(rpart)       
+library(rpart.plot) 
+library(ROCR)        
+
+# Check for missing values
+missing_values <- colSums(is.na(CVD))
+
+# Print the number of missing values for each column
+print(missing_values)
+
+# Check for duplicate rows
+duplicate_rows <- CVD[duplicated(CVD), ]
+
+# Print duplicate rows
+print(duplicate_rows)
+
+# Convert 'bmi' to numeric, replacing 'N/A' with NA
+CVD$bmi <- as.numeric(ifelse(CVD$bmi == "N/A", NA, CVD$bmi))
+# Handle missing values in 'bmi' by imputing with median
+CVD$bmi[is.na(CVD$bmi)] <- median(CVD$bmi, na.rm = TRUE)
+
+
+# 
+CVD
+# Encode categorical variables using dummy variables (one-hot encoding)
+CVD <- CVD %>% mutate(gender_male = as.integer(gender == "Male"),
+         ever_married_yes = as.integer(ever_married == "Yes"),
+         work_type_private = as.integer(work_type == "Private"),
+         residence_type_urban = as.integer(Residence_type == "Urban"),
+         smoking_status_formerly_smoked = as.integer(smoking_status == "formerly smoked"),
+         smoking_status_never_smoked = as.integer(smoking_status == "never smoked"),
+         smoking_status_smokes = as.integer(smoking_status == "smokes"))
+
+# Remove the original categorical variables
+CVD <- select(CVD, -gender, -ever_married, -work_type, -Residence_type, -smoking_status)
+
+# Print the pre-processed dataset
+head(CVD)
+```
+There are no missing values, duplicate rows in the dataset
+
+Exploratory Data Analysis: 
+
+```{r}
+# Summary statistics
+summary(CVD)
+
+# Distribution of heart disease
+ggplot(CVD, aes(x = factor(heart_disease))) +
+  geom_bar(fill = "skyblue", color = "black", width = 0.5) +
+  labs(title = "Distribution of Heart Disease",
+       x = "Heart Disease",
+       y = "Count")
+
+# Gender distribution
+ggplot(CVD, aes(x = factor(gender_male), fill = factor(heart_disease))) +
+  geom_bar(position = "dodge") +
+  labs(title = "Gender Distribution by Heart Disease",
+       x = "Gender",
+       y = "Count",
+       fill = "Heart Disease") +
+  scale_x_discrete(labels = c("Female", "Male"))
+
+# Age distribution by heart disease
+ggplot(CVD, aes(x = age, fill = factor(heart_disease))) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Age Distribution by Heart Disease",
+       x = "Age",
+       y = "Density",
+       fill = "Heart Disease")
+
+# Distribution of stroke with reduced width
+ggplot(CVD, aes(x = factor(stroke))) +
+  geom_bar(fill = "skyblue", color = "black", width = 0.5) +
+  labs(title = "Distribution of Stroke",
+       x = "Stroke",
+       y = "Count") 
+
+# Hypertension distribution
+ggplot(CVD, aes(x = factor(hypertension), fill = factor(heart_disease))) +
+  geom_bar(position = "dodge") +
+  labs(title = "Hypertension Distribution by Heart Disease",
+       x = "Hypertension",
+       y = "Count",
+       fill = "Heart Disease")
+
+# Married status distribution
+ggplot(CVD, aes(x = factor(ever_married_yes), fill = factor(heart_disease))) +
+  geom_bar(position = "dodge") +
+  labs(title = "Married Status Distribution by Heart Disease",
+       x = "Ever Married",
+       y = "Count",
+       fill = "Heart Disease") +
+  scale_x_discrete(labels = c("No", "Yes"))
+
+# Work type distribution
+ggplot(CVD, aes(x = factor(work_type_private), fill = factor(heart_disease))) +
+  geom_bar(position = "dodge") +
+  labs(title = "Work Type Distribution by Heart Disease",
+       x = "Work Type",
+       y = "Count",
+       fill = "Heart Disease") +
+  scale_x_discrete(labels = c("Non-Private", "Private"))
+
+
+# Residence type distribution
+ggplot(CVD, aes(x = factor(residence_type_urban), fill = factor(heart_disease))) +
+  geom_bar(position = "dodge") +
+  labs(title = "Residence Type Distribution by Heart Disease",
+       x = "Residence Type",
+       y = "Count",
+       fill = "Heart Disease") +
+  scale_x_discrete(labels = c("Rural", "Urban"))
+
+# Average glucose level distribution by heart disease
+ggplot(CVD, aes(x = avg_glucose_level, fill = factor(heart_disease))) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Average Glucose Level Distribution by Heart Disease",
+       x = "Average Glucose Level",
+       y = "Density",
+       fill = "Heart Disease")
+
+# Smoking status distribution
+
+ggplot(CVD, aes(x = factor(smoking_status_formerly_smoked), fill = factor(heart_disease))) +
+  geom_bar(position = "dodge") +
+  labs(title = "Smoking Status Distribution by Heart Disease",
+       x = "Smoking Status",
+       y = "Count",
+       fill = "Heart Disease") +
+  scale_x_discrete(labels = c("Not Formerly Smoked", "Formerly Smoked"))
+
+# Stroke distribution
+ggplot(CVD, aes(x = factor(stroke), fill = factor(heart_disease))) +
+  geom_bar(position = "dodge") +
+  labs(title = "Stroke Distribution by Heart Disease",
+       x = "Stroke",
+       y = "Count",
+       fill = "Heart Disease")
+```
+
+Logistic Regression
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(caret)
+library(e1071)
+
+# Prepare data for modeling
+set.seed(123) 
+training_samples <- CVD$heart_disease %>%
+  createDataPartition(p = 0.75, list = FALSE)
+train_data <- CVD[training_samples, ]
+test_data <- CVD[-training_samples, ]
+
+#Over all model
+# Fit logistic regression model
+fit <- glm(heart_disease ~ . - id , data = train_data, family = binomial())
+
+# Summarize the model
+summary(fit)
+
+# Predict on test data
+predictions_lr <- predict(fit, test_data, type = "response")
+predicted_classes <- ifelse(predictions_lr > 0.5, 1, 0)
+
+# Confusion matrix to evaluate the model
+confusionMatrix(as.factor(predicted_classes), as.factor(test_data$heart_disease))
+
+# Plot ROC curve and calculate AUC
+pred <- prediction(predictions_lr, test_data$heart_disease)
+perf <- performance(pred, measure = "tpr", x.measure = "fpr")
+plot(perf, main = "ROC Curve")
+auc <- performance(pred, measure = "auc")
+auc_value <- auc@y.values[[1]]
+cat("AUC:", auc_value, "\n")
+conf_mat1 <- confusionMatrix(as.factor(predicted_classes), as.factor(test_data$heart_disease))
+cat("Logistic Model1 Evaluation Metrics:\n")
+cat("Accuracy:", conf_mat1$overall['Accuracy'], "\n")
+cat("Precision:", conf_mat1$byClass['Precision'], "\n")
+cat("Recall:", conf_mat1$byClass['Recall'], "\n")
+cat("F1 Score:", conf_mat1$byClass['F1'], "\n")
+
+
+
+
+
+fit2 <- glm(heart_disease ~ . - id - hypertension - bmi - stroke - ever_married_yes - work_type_private - residence_type_urban - smoking_status_formerly_smoked - smoking_status_never_smoked , data = train_data, family = binomial())
+
+# Summarize the model
+summary(fit2)
+
+# Predict on test data
+predictions2 <- predict(fit2, test_data, type = "response")
+predicted_classes2 <- ifelse(predictions2 > 0.5, 1, 0)
+
+# Confusion matrix to evaluate the model
+confusionMatrix(as.factor(predicted_classes2), as.factor(test_data$heart_disease))
+
+# Plot ROC curve and calculate AUC
+pred2 <- prediction(predictions2, test_data$heart_disease)
+perf2 <- performance(pred2, measure = "tpr", x.measure = "fpr")
+plot(perf2, main = "ROC Curve")
+auc2 <- performance(pred2, measure = "auc")
+auc_value2 <- auc2@y.values[[1]]
+cat("AUC:", auc_value2, "\n")
+
+conf_mat2 <- confusionMatrix(as.factor(predicted_classes2), as.factor(test_data$heart_disease))
+cat("Logistic Model2 Evaluation Metrics:\n")
+cat("Accuracy:", conf_mat2$overall['Accuracy'], "\n")
+cat("Precision:", conf_mat2$byClass['Precision'], "\n")
+cat("Recall:", conf_mat2$byClass['Recall'], "\n")
+cat("F1 Score:", conf_mat2$byClass['F1'], "\n")
+
+
+
+
+
+```
+
+
+kNN
+```{r}
+# Convert heart_disease to a factor with two levels
+train_data$heart_disease <- factor(train_data$heart_disease, levels = c(0, 1))
+test_data$heart_disease <- factor(test_data$heart_disease, levels = c(0,1))
+# Train-control part
+k_values <- data.frame(k = 1:100)
+
+# Create a trainControl object for cross-validation
+train_control <- trainControl(method = "cv", number = 5)
+
+# Train the kNN model with a range of k values
+kNN_model <- train(heart_disease ~ .,           # Formula: response ~ predictors
+                   data = train_data,              # Training data
+                   method = "knn",             # kNN algorithm
+                   trControl = train_control,  # Training control
+                   tuneGrid = k_values)        # Grid of values for tuning parameter
+
+
+
+#Plot the kNN model
+library(ggplot2)
+# generate the predicted labels from the training data
+predicted_labels <- predict(kNN_model, train_data)
+
+# Combine the training data with the predicted labels
+train_data_with_labels <- cbind(train_data, predicted_labels)
+
+cv_results <- kNN_model$results
+
+# Plot the training data points
+
+ggplot(cv_results, aes(x = k, y = Accuracy)) +
+  geom_line() +
+  labs(title = "Root Mean Squared Error vs. Number of Neighbors (k)",
+       x = "k (Number of Neighbors)",
+       y = "Root Mean Squared Error")
+
+
+```
+# generate prediction for the test data (CVD_te) using the trained model and plot the kNN
+```{r}
+test_predictions <- predict(kNN_model, test_data[, !names(test_data) %in% "heart_disease"], prob = TRUE)
+
+
+# Create a data frame with the actual and predicted values
+predictions_df <- data.frame(Actual = test_data$heart_disease, Predicted = test_predictions)
+
+# Use the scatterplot function to create the kNN scatterplot
+
+ggplot(predictions_df, aes(x = Actual, y = Predicted, color = factor(Actual))) +
+  geom_point() +
+  labs(x = "Actual", y = "Predicted", color = "Actual Class") +
+  ggtitle("kNN Scatterplot")
+
+
+```
+# Confusion matrix
+```{r}
+# Create confusion matrix
+conf_matrix <- confusionMatrix(test_predictions, test_data$heart_disease)
+print(conf_matrix)
+
+# Extract and print evaluation metrics from confusion matrix
+cat("Precision:", conf_matrix$byClass['Precision'], "\n")
+cat("Recall (Sensitivity):", conf_matrix$byClass['Recall'], "\n")
+cat("F1 Score:", conf_matrix$byClass['F1'], "\n")
+
+
+```
+# ROC-AUC
+```{r}
+test_prob_predictions <- predict(kNN_model, test_data[, !names(test_data) %in% c("heart_disease")], type = "prob")
+
+pred <- prediction(test_prob_predictions[,2], test_data$heart_disease)
+
+perf <- performance(pred, "tpr", "fpr")
+
+# Caculate AUC
+auc <- performance(pred, measure = "auc")
+auc_value <- auc@y.values[[1]]  
+cat("AUC for kNN Model:", auc_value, "\n")
+
+# Plot ROC curve
+plot(perf, main = "ROC Curve for kNN")
+
+```
+
+
+Decision Tree
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(ROCR)
+
+# Prepare data for modeling
+set.seed(123)  
+training_samples <- CVD$heart_disease %>%
+  createDataPartition(p = 0.75, list = FALSE)
+train_data <- CVD[training_samples, ]
+test_data <- CVD[-training_samples, ]
+
+# Fit decision tree model with adjusted parameters
+fit_dt <- rpart(heart_disease ~ . - id, 
+                data = train_data, 
+                method = "class", 
+                control = rpart.control(minsplit = 20, 
+                                        minbucket = 1, 
+                                        cp = 0.001, 
+                                        maxdepth = 5))
+
+summary(fit_dt)
+# Plot the decision tree with improved visualization
+rpart.plot(fit_dt, 
+           main = "Decision Tree for Heart Disease Prediction", 
+           extra = 106)  # 'extra = 106' shows split labels, 'improve' percentages, and node numbers
+
+# Predict on test data
+predictions_dt <- predict(fit_dt, test_data, type = "class")
+prob_predictions_dt <- predict(fit_dt, test_data, type = "prob")[,2]
+
+# Confusion matrix to evaluate the model
+confusionMatrix(predictions_dt, as.factor(test_data$heart_disease))
+conf_mat_dt <- confusionMatrix(predictions_dt, as.factor(test_data$heart_disease))
+cat("Decision Tree Model Evaluation Metrics:\n")
+cat("Accuracy:", conf_mat_dt$overall['Accuracy'], "\n")
+cat("Precision:", conf_mat_dt$byClass['Precision'], "\n")
+cat("Recall:", conf_mat_dt$byClass['Recall'], "\n")
+cat("F1 Score:", conf_mat_dt$byClass['F1'], "\n")
+
+# Plot ROC curve and calculate AUC
+pred_dt <- prediction(prob_predictions_dt, test_data$heart_disease)
+perf_dt <- performance(pred_dt, "tpr", "fpr")
+plot(perf_dt, main = "ROC Curve for Decision Tree")
+auc_dt <- performance(pred_dt, "auc")
+auc_value_dt <- auc_dt@y.values[[1]]
+cat("AUC for Decision Tree:", auc_value_dt, "\n")
+
+```
+
+
+
+```{r}
+# Fit Random Forest model
+library(randomForest)
+# Convert 'heart_disease' to factor
+CVD$heart_disease <- factor(CVD$heart_disease)
+
+# Prepare data for modeling
+set.seed(123)  # for reproducibility
+training_samples <- CVD$heart_disease %>%
+  createDataPartition(p = 0.75, list = FALSE)
+train_data <- CVD[training_samples, ]
+test_data <- CVD[-training_samples, ]
+
+# Fit Random Forest model
+fit_rf <- randomForest(heart_disease ~ . - id, 
+                       data = train_data, 
+                       ntree = 500,  # Number of trees in the forest
+                       mtry = sqrt(ncol(train_data)),  # Number of variables randomly sampled as candidates at each split
+                       importance = TRUE)  # Calculate variable importance
+
+print(fit_rf)
+
+# Predict on test data
+predictions_rf <- predict(fit_rf, test_data)
+
+# Convert predictions to factor and ensure levels match those of the actual data
+predictions_rf <- factor(predictions_rf, levels = levels(test_data$heart_disease))
+
+
+
+
+# Confusion matrix to evaluate the model
+confusionMatrix(predictions_rf, test_data$heart_disease)
+conf_mat_rf <- confusionMatrix(predictions_rf, test_data$heart_disease)
+cat("Random Forest Model Evaluation Metrics:\n")
+cat("Accuracy:", conf_mat_rf$overall['Accuracy'], "\n")
+cat("Precision:", conf_mat_rf$byClass['Precision'], "\n")
+cat("Recall:", conf_mat_rf$byClass['Recall'], "\n")
+cat("F1 Score:", conf_mat_rf$byClass['F1'], "\n")
+
+
+
+# Plot ROC curve and calculate AUC
+
+train_data$heart_disease <- factor(train_data$heart_disease, levels = c(0, 1))
+test_data$heart_disease <- factor(test_data$heart_disease, levels = c(0,1))
+
+prob_predictions_rf <- predict(fit_rf, test_data, type = "prob")[,2]
+pred_rf <- prediction(prob_predictions_rf, test_data$heart_disease)
+perf_rf <- performance(pred_rf, "tpr", "fpr")
+plot(perf_rf, main = "ROC Curve for Random Forest")
+auc_rf <- performance(pred_rf, "auc")
+auc_value_rf <- auc_rf@y.values[[1]]
+cat("AUC for Random Forest:", auc_value_rf, "\n")
+```
+
+```{r}
+# Ensemble Method
+
+predictions_df <- as.numeric(predictions_df[,2])  
+predictions_rf <- as.numeric(predictions_rf)
+predictions_dt <- as.numeric(predictions_dt)
+predictions_lr <- as.numeric(predictions_lr)
+predictions2 <- as.numeric(predictions2)
+
+
+# Combine predictions
+combined_predictions <- cbind(predictions_rf, predictions_df, predictions_dt, predictions_lr, predictions2)
+
+# Calculate the mean of predictions row-wise
+ensemble_predictions <- ifelse(rowMeans(combined_predictions) > 0.5, 1, 0)
+
+# Evaluate ensemble performance
+conf_mat_ensemble <- confusionMatrix(as.factor(ensemble_predictions), as.factor(test_data$heart_disease))
+print(conf_mat_ensemble)
+
+
+ensemble_predictions <- ifelse(rowMeans(cbind(predictions_rf, predictions_df, predictions_dt, predictions_lr, predictions2)) > 0.5, 1, 0)
+
+# Evaluate ensemble performance
+
+conf_mat_ensemble <- confusionMatrix(as.factor(ensemble_predictions), test_data$heart_disease)
+print(conf_mat_ensemble)
+```
